@@ -8,18 +8,18 @@ use std::env;
 use std::path::Path;
 
 fn print_usage() {
-    println!("Usage:");
     println!(
-        "  tp2_integrity_checker --target <FILE_OR_DIRECTORY> --ioc <IOC_FILE> --report <REPORT_FILE>"
+        "Usage:\n  tp2_integrity_checker --target <FILE_OR_DIRECTORY> --ioc <IOC_FILE> --report <REPORT_FILE> [--json] [--only-matches]"
     );
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-
     let mut target_arg = None;
     let mut ioc_arg = None;
     let mut report_arg = None;
+    let mut use_json = false;
+    let mut only_matches = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -48,6 +48,14 @@ fn main() {
                     i += 1;
                 }
             }
+            "--json" => {
+                use_json = true;
+                i += 1;
+            }
+            "--only-matches" => {
+                only_matches = true;
+                i += 1;
+            }
             _ => i += 1,
         }
     }
@@ -60,10 +68,7 @@ fn main() {
         }
     };
 
-    println!("TP2 File Integrity Checker and IOC Matcher");
-    println!("Target: {}", target_path.display());
-    println!("IOC file: {}", ioc_path.display());
-    println!("Report: {}\n", report_path.display());
+    println!("TP2 File Integrity Checker (with Bonus Options)");
 
     let (iocs, invalid_ioc_lines) = match ioc::load_iocs(ioc_path) {
         Ok(data) => data,
@@ -73,8 +78,7 @@ fn main() {
         }
     };
 
-    let scan_results = scanner::scan_target(target_path, &iocs);
-
+    let mut scan_results = scanner::scan_target(target_path, &iocs);
     let mut files_scanned = 0;
     let mut matches_found = 0;
     let mut errors_count = 0;
@@ -92,16 +96,18 @@ fn main() {
         }
     }
 
-    println!("Summary:");
-    println!("  * Files scanned: {}", files_scanned);
-    println!("  * IOC entries loaded: {}", iocs.len());
-    println!("  * Invalid IOC lines: {}", invalid_ioc_lines);
-    println!("  * Matches found: {}", matches_found);
-    println!("  * Errors: {}", errors_count);
+    println!(
+        "Summary:\n  * Files scanned: {}\n  * IOC entries loaded: {}\n  * Invalid IOC lines: {}\n  * Matches found: {}\n  * Errors: {}",
+        files_scanned,
+        iocs.len(),
+        invalid_ioc_lines,
+        matches_found,
+        errors_count
+    );
 
     if !matches.is_empty() {
         println!("\nMatches:");
-        for mat in matches {
+        for mat in &matches {
             println!("  [ALERT] {}", mat.path);
             if let Some(ref sha) = mat.sha256 {
                 println!("    SHA-256: {}", sha);
@@ -112,9 +118,19 @@ fn main() {
         }
     }
 
-    if let Err(e) = report::write_csv_report(report_path, &scan_results) {
-        eprintln!("[ERROR] Failed to write CSV report: {}", e);
+    if only_matches {
+        scan_results.retain(|res| matches!(res.status, ScanStatus::Match(_)));
+    }
+
+    let report_res = if use_json {
+        report::write_json_report(report_path, &scan_results)
     } else {
-        println!("\nCSV report written to {}", report_path.display());
+        report::write_csv_report(report_path, &scan_results)
+    };
+
+    if let Err(e) = report_res {
+        eprintln!("[ERROR] Failed to write report: {}", e);
+    } else {
+        println!("\nReport written successfully to {}", report_path.display());
     }
 }
